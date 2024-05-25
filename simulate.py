@@ -1,6 +1,7 @@
 from flying_sim.drone import Drone
 from flying_sim.controllers import AttitudeController, ControlAllocation, PositionController
 from flying_sim.trajectory import Trajectory
+from flying_sim.estimation import Sensors, Estimation
 from configs.config import Config
 from stable_baselines3.ppo.ppo import PPO
 
@@ -25,6 +26,8 @@ class Simulate:
         self.attitude_controller = AttitudeController(self.drone)
         self.control_allocation = ControlAllocation(self.drone)
         self.trajectory = Trajectory(self.config)
+        self.sensors = Sensors(self.drone)
+        self.estimation = Estimation(self.drone)
 
         self.reset()
 
@@ -42,6 +45,8 @@ class Simulate:
         self.acceleration_des = np.array([0, 0, 0])
         self.velocity_ref = np.array([0, 0, 0])
         self.position_ref = np.array([0, 0, 0])
+        self.measurements = np.zeros((12, ))
+        self.state_estimates = np.zeros((12, ))
         self.time = [0]
 
     def simulate(self):
@@ -75,6 +80,12 @@ class Simulate:
             # Time step for drone
             self.drone.step(control_input, wind=self.wind)
 
+            # Acquire sensor measurements
+            sensor_measurements = self.sensors.sensor_measurements(control_input)
+
+            # Update state estimate
+            self.estimation.estimate_state(sensor_measurements, control_input)
+
             # Log states and time
             self.states = np.vstack((self.states, self.drone.state.copy()))
             self.aux_states = np.vstack((self.aux_states, np.hstack((self.drone.velocity_e, self.drone.lin_acc))))
@@ -85,6 +96,8 @@ class Simulate:
             self.acceleration_ref = np.vstack((self.acceleration_ref, acc_ref))
             self.velocity_ref = np.vstack((self.velocity_ref, vel_ref))
             self.position_ref = np.vstack((self.position_ref, pos_ref))
+            self.measurements = np.vstack((self.measurements, sensor_measurements))
+            self.state_estimates = np.vstack((self.state_estimates, self.estimation.state_estimate))
             self.time.append(self.time[-1] + self.drone.dt)
 
             # Termination condition
@@ -126,26 +139,32 @@ class Simulate:
 
         ax[0, 0].plot(self.time, self.states[:, 0] * 180 / np.pi, label="state")
         ax[0, 0].plot(self.time, self.attitude_ref[:, 0] * 180 / np.pi, label="ref")
+        ax[0, 0].plot(self.time, self.state_estimates[:, 0] * 180 / np.pi)
         ax[0, 0].set_ylabel("Roll Angle [deg]")
         ax[0, 0].grid()
 
         ax[1, 0].plot(self.time, self.states[:, 1] * 180 / np.pi, self.time, self.attitude_ref[:, 1] * 180 / np.pi)
+        ax[1, 0].plot(self.time, self.state_estimates[:, 1] * 180 / np.pi)
         ax[1, 0].set_ylabel("Pitch Angle [deg]")
         ax[1, 0].grid()
 
         ax[2, 0].plot(self.time, self.states[:, 2] * 180 / np.pi, self.time, self.attitude_ref[:, 2] * 180 / np.pi)
+        ax[2, 0].plot(self.time, self.state_estimates[:, 2] * 180 / np.pi)
         ax[2, 0].set_ylabel("Yaw Angle [deg]")
         ax[2, 0].grid()
 
         ax[0, 1].plot(self.time, self.states[:, 3] * 180 / np.pi, self.time, self.angular_vel_ref[:, 0] * 180 / np.pi)
+        ax[0, 1].plot(self.time, self.state_estimates[:, 3] * 180 / np.pi)
         ax[0, 1].set_ylabel("Roll Rate [deg/s]")
         ax[0, 1].grid()
 
         ax[1, 1].plot(self.time, self.states[:, 4] * 180 / np.pi, self.time, self.angular_vel_ref[:, 1] * 180 / np.pi)
+        ax[1, 1].plot(self.time, self.state_estimates[:, 4] * 180 / np.pi)
         ax[1, 1].set_ylabel("Pitch Rate [deg/s]")
         ax[1, 1].grid()
 
         ax[2, 1].plot(self.time, self.states[:, 5] * 180 / np.pi, self.time, self.angular_vel_ref[:, 2] * 180 / np.pi)
+        ax[2, 1].plot(self.time, self.state_estimates[:, 5] * 180 / np.pi)
         ax[2, 1].set_ylabel("Yaw Rate [deg/s]")
         ax[2, 1].grid()
 
@@ -155,30 +174,36 @@ class Simulate:
 
         fig2, ax = plt.subplots(3, 3)
         ax[0, 0].plot(self.time, self.states[:, 6], self.time, self.position_ref[:, 0])
+        ax[0, 0].plot(self.time, self.state_estimates[:, 6])
         ax[0, 0].scatter(self.trajectory.time, self.trajectory.waypoints[:, 0])
         ax[0, 0].set_ylabel("X-position [m]")
         ax[0, 0].grid()
 
         ax[1, 0].plot(self.time, self.states[:, 7], self.time, self.position_ref[:, 1])
+        ax[1, 0].plot(self.time, self.state_estimates[:, 7])
         ax[1, 0].scatter(self.trajectory.time, self.trajectory.waypoints[:, 1])
         ax[1, 0].set_ylabel("Y-position [m]")
         ax[1, 0].grid()
 
         ax[2, 0].plot(self.time, self.states[:, 8], self.time, self.position_ref[:, 2])
+        ax[2, 0].plot(self.time, self.state_estimates[:, 8])
         ax[2, 0].scatter(self.trajectory.time, self.trajectory.waypoints[:, 2])
         ax[2, 0].set_ylabel("Z-position [m]")
         ax[2, 0].set_xlabel("Time [s]")
         ax[2, 0].grid()
 
         ax[0, 1].plot(self.time, self.aux_states[:, 0], self.time, self.velocity_ref[:, 0])
+        ax[0, 1].plot(self.time, self.state_estimates[:, 9])
         ax[0, 1].set_ylabel("X-velocity [m/s]")
         ax[0, 1].grid()
 
         ax[1, 1].plot(self.time, self.aux_states[:, 1], self.time, self.velocity_ref[:, 1])
+        ax[1, 1].plot(self.time, self.state_estimates[:, 10])
         ax[1, 1].set_ylabel("Y-velocity [m/s]")
         ax[1, 1].grid()
 
         ax[2, 1].plot(self.time, self.aux_states[:, 2], self.time, self.velocity_ref[:, 2])
+        ax[2, 1].plot(self.time, self.state_estimates[:, 11])
         ax[2, 1].set_ylabel("Z-velocity [m/s]")
         ax[2, 1].set_xlabel("Time [s]")
         ax[2, 1].grid()
@@ -220,19 +245,19 @@ class Simulate:
         ax[3].set_ylabel("rotational velocity 4 [rad/s]")
         ax[3].grid()
 
-        fig4, ax = plt.subplots(3, 1)
+        # fig4, ax = plt.subplots(3, 1)
 
-        ax[0].plot(self.time[:-1], self.drone.thrust[::4])
-        ax[0].set_ylabel("Drag force magnitude [N]")
-        ax[0].grid()
-
-        ax[1].plot(self.time[:-1], self.drone.gravity[::4])
-        ax[1].set_ylabel("Gravity force magnitude [N]")
-        ax[1].grid()
-
-        ax[2].plot(self.time[:-1], self.drone.drag[::4])
-        ax[2].set_ylabel("Drag force magnitude [N]")
-        ax[2].grid()
+        # ax[0].plot(self.time[:-1], self.drone.thrust[::4])
+        # ax[0].set_ylabel("Drag force magnitude [N]")
+        # ax[0].grid()
+        #
+        # ax[1].plot(self.time[:-1], self.drone.gravity[::4])
+        # ax[1].set_ylabel("Gravity force magnitude [N]")
+        # ax[1].grid()
+        #
+        # ax[2].plot(self.time[:-1], self.drone.drag[::4])
+        # ax[2].set_ylabel("Drag force magnitude [N]")
+        # ax[2].grid()
 
         plt.tight_layout()
 

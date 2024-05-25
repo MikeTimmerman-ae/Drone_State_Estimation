@@ -55,7 +55,7 @@ class Config(object):
     # Configuration of randomly generated trajectory
     traj_config = BaseConfig()
     traj_config.init_pos = np.array([0.0, 0.0, 0.0])
-    traj_config.tf = 25
+    traj_config.tf = 10
     traj_config.min_dist = 25
     traj_config.max_dist = 50
     traj_config.v_des = 9

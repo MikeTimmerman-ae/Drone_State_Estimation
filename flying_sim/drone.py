@@ -71,7 +71,7 @@ class Drone:
         k4 = self.dxdt(self.state + self.dt * k3, input)
         self.state = self.state + self.dt * (1 / 6 * k1 + 1 / 3 * k2 + 1 / 3 * k3 + 1 / 6 * k4)
         if wind and self.wind:
-            Rbe = np.linalg.inv(self.rotationBodytoEarth(self.attitude))
+            Rbe = self.rotationBodytoEarth(self.attitude).T
             wind = 3 * np.array([np.sqrt(3) / 3, np.sqrt(3) / 3, np.sqrt(3) / 3])
             self.state[9:12] += Rbe @ wind
             self.wind = False
@@ -122,7 +122,7 @@ class Drone:
                                                                        self.max_rotor_speed**2)
         self.thrust.append(np.linalg.norm(T))
         # Gravity
-        Rbe = np.linalg.inv(self.rotationBodytoEarth(state[0:3]))
+        Rbe = self.rotationBodytoEarth(state[0:3]).T
         G = Rbe @ np.array([0, 0, self.m * self.g])
         self.gravity.append(np.linalg.norm(G))
 
