@@ -3,13 +3,14 @@ from flying_sim.controllers import AttitudeController, ControlAllocation, Positi
 from flying_sim.trajectory import Trajectory
 from flying_sim.estimation import Sensors, Estimation
 from configs.config import Config
-from stable_baselines3.ppo.ppo import PPO
+# from stable_baselines3.ppo.ppo import PPO
 
 import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import argparse
+import time
 
 matplotlib.use('TkAgg')
 
@@ -50,6 +51,7 @@ class Simulate:
         self.time = [0]
 
     def simulate(self):
+        start_time = time.time() # Runtime timer
         if self.trajectory_type == "random":
             self.trajectory.random_spline_trajectory()
         elif self.trajectory_type == "hover":
@@ -104,6 +106,8 @@ class Simulate:
             if np.linalg.norm(self.trajectory.waypoints[-1] - self.drone.position) < 0.5:
                 print(f"Drone reach last waypoint {self.time[-1]} sec.")
                 break
+            
+        print("Runtime: %s seconds" % (time.time() - start_time)) # Print runtime
 
     def evaluate(self, n=100):
         max_dev = []

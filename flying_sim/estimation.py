@@ -1,4 +1,5 @@
 import numpy as np
+from flying_sim.pf import ParticleFilter
 
 
 class Sensors:
@@ -43,13 +44,14 @@ class Estimation:
         self.pose_Q = 1e-3 * np.eye(6)
         self.pose_R = 1e-1 * np.eye(6)
         self.att_cov = 1e-3 * np.eye(6)
+        self.pf = ParticleFilter(self.drone)
 
     def estimate_state(self, meas, input):
-        pose_est = self.position_esimate(meas[:6], input)
-        att_est = self.attitude_estimate(meas[6:])
+        pose_est = self.position_estimate(meas[:6], input)
+        att_est = self.attitude_estimate(meas[6:], input)
         self.state_estimate = np.hstack((att_est, pose_est))
 
-    def position_esimate(self, pose_meas, input):
+    def position_estimate(self, pose_meas, input):
         pose_est = self.state_estimate[6:]              # x_k
         att_est = self.state_estimate[:6]
 
@@ -69,6 +71,7 @@ class Estimation:
 
         return pose_est
 
-    def attitude_estimate(self, att_meas):
+    def attitude_estimate(self, att_meas, input):
 
-        return np.hstack((np.zeros(3,), att_meas[3:]))
+        # return np.hstack((np.zeros(3,), att_meas[3:]))        # No attitude estimation
+        return self.pf.attitude_estimate_PF(att_meas, input)    # PF attutude estimation
