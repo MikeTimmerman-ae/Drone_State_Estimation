@@ -1,31 +1,34 @@
 import numpy as np
 from flying_sim.pf import ParticleFilter
+from flying_sim.MKF import MultiplicativeKF
 
 
 class Sensors:
 
     def __init__(self, drone):
         self.drone = drone
-        self.gyro_noise = 1e-3
-        self.acc_noise = 1e-3
+        self.gyro_noise = 5e-2
+        self.acc_noise = 1e-2
+        self.mag_noise = 1e-2
         self.pos_noise = 1e-0
         self.vel_noise = 1e-1
 
     def sensor_measurements(self, input):
-        ang_vel, acc = self.IMU(input)
+        ang_vel, acc, mag = self.IMU(input)
         pos, vel_e = self.GPS()
-        return np.hstack((pos, vel_e, acc, ang_vel))
+        return np.hstack((pos, vel_e, acc, mag, ang_vel))
 
     def IMU(self, input):
         # Gyroscope model
-        ang_vel = self.drone.angular_velocity + np.random.normal(0, self.gyro_noise)
+        ang_vel = self.drone.angular_velocity + np.random.normal(1e-3, self.gyro_noise)
 
         # Accelerometer model
         f_b = self.drone.get_force(self.drone.state, input) / self.drone.m                              # specific force in body-frame
         g_b = self.drone.rotationBodytoEarth(self.drone.attitude).T @ np.array([0, 0, self.drone.g])    # gravity in body-frame
         acc = f_b + g_b + np.random.normal(0, self.acc_noise)
+        mag = self.drone.rotationBodytoEarth(self.drone.attitude).T @ np.array([1, 0, 0])
 
-        return ang_vel, acc
+        return ang_vel, acc, mag
 
     def GPS(self):
         # GPS model
@@ -45,6 +48,23 @@ class Estimation:
         self.pose_R = 1e-1 * np.eye(6)
         self.att_cov = 1e-3 * np.eye(6)
         self.pf = ParticleFilter(self.drone)
+        self.mkf = MultiplicativeKF(self.drone)
+
+    @property
+    def attitude(self):
+        return self.state_estimate[0:3]
+
+    @property
+    def angular_velocity(self):
+        return self.state_estimate[3:6]
+
+    @property
+    def position(self):
+        return self.state_estimate[6:9]
+
+    @property
+    def velocity_e(self):
+        return self.state_estimate[9:]
 
     def estimate_state(self, meas, input):
         pose_est = self.position_estimate(meas[:6], input)
@@ -74,4 +94,5 @@ class Estimation:
     def attitude_estimate(self, att_meas, input):
 
         # return np.hstack((np.zeros(3,), att_meas[3:]))        # No attitude estimation
-        return self.pf.attitude_estimate_PF(att_meas, input)    # PF attutude estimation
+        # return self.pf.attitude_estimate_PF(att_meas, input)    # PF attutude estimation
+        return self.mkf.estimate_attitude(att_meas)

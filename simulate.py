@@ -3,7 +3,7 @@ from flying_sim.controllers import AttitudeController, ControlAllocation, Positi
 from flying_sim.trajectory import Trajectory
 from flying_sim.estimation import Sensors, Estimation
 from configs.config import Config
-# from stable_baselines3.ppo.ppo import PPO
+from scipy.spatial.transform import Rotation
 
 import numpy as np
 import pandas as pd
@@ -46,7 +46,7 @@ class Simulate:
         self.acceleration_des = np.array([0, 0, 0])
         self.velocity_ref = np.array([0, 0, 0])
         self.position_ref = np.array([0, 0, 0])
-        self.measurements = np.zeros((12, ))
+        self.measurements = np.zeros((15, ))
         self.state_estimates = np.zeros((12, ))
         self.time = [0]
 
@@ -62,21 +62,21 @@ class Simulate:
         thrust_des = -self.drone.m * self.drone.g
 
         # Simulation loop
-        while self.time[-1] < self.config.traj_config.tf * 1.5:
+        while self.time[-1] < self.config.traj_config.tf * 1.1:
             # Reference trajectory
             pos_ref = self.trajectory.position_ref(self.time[-1])
             vel_ref = self.trajectory.velocity_ref(self.time[-1])
             acc_ref = self.trajectory.acceleration_ref(self.time[-1])
 
             # Position controller
-            des_lin_acc = self.position_controller.get_desired_lin_acc(self.drone.position, self.drone.velocity_e, self.drone.lin_acc, pos_ref, vel_ref, acc_ref)
-            att_des, thrust_des = self.position_controller.get_desired_attitude(self.drone.attitude, thrust_des, self.drone.lin_acc, des_lin_acc)
+            des_lin_acc = self.position_controller.get_desired_lin_acc(self.estimation.position, self.estimation.velocity_e, self.drone.lin_acc, pos_ref, vel_ref, acc_ref)
+            att_des, thrust_des = self.position_controller.get_desired_attitude(self.estimation.attitude, thrust_des, self.drone.lin_acc, des_lin_acc)
             yaw_des = 0     # np.arctan2(drone.state[10], drone.state[9])
             des_attitude = np.array([att_des[0], att_des[1], yaw_des])        # Desired attitude
 
             # Attitude controller
-            des_angular_vel = self.attitude_controller.get_des_angular_vel(self.drone.attitude, des_attitude)
-            control_moment = self.attitude_controller.get_control_moment(control_moment, self.drone.angular_velocity, des_angular_vel)
+            des_angular_vel = self.attitude_controller.get_des_angular_vel(self.estimation.attitude, des_attitude)
+            control_moment = self.attitude_controller.get_control_moment(control_moment, self.estimation.angular_velocity, des_angular_vel)
             control_input = self.control_allocation.get_control_input(control_moment, thrust_des)
 
             # Time step for drone
@@ -103,33 +103,49 @@ class Simulate:
             self.time.append(self.time[-1] + self.drone.dt)
 
             # Termination condition
-            if np.linalg.norm(self.trajectory.waypoints[-1] - self.drone.position) < 0.5:
-                print(f"Drone reach last waypoint {self.time[-1]} sec.")
-                break
-            
+            # if np.linalg.norm(self.trajectory.waypoints[-1] - self.drone.position) < 0.5:
+            #     print(f"Drone reach last waypoint {self.time[-1]} sec.")
+                # break
+
         print("Runtime: %s seconds" % (time.time() - start_time)) # Print runtime
 
     def evaluate(self, n=100):
-        max_dev = []
+        max_control_dev = []
+        rmse_control_pos = []
+        rmse_estimate_att = []
         max_vel = []
-        rmse_pos = []
         rms_vel = []
+        max_estimate_att = []
         for i in range(n):
             self.simulate()
+            # Control Position Error
             pos_dev = np.linalg.norm(self.states[:, 6:9] - self.position_ref, axis=1)
+            max_control_dev.append(np.max(pos_dev))
+            rmse_control_pos.append(np.sqrt((pos_dev ** 2).mean()))
+
+            # Velocity Quantification
             velocity = np.linalg.norm(self.aux_states[:, 0:3], axis=1)
-
-            max_dev.append(np.max(pos_dev))
-            rmse_pos.append(np.sqrt((pos_dev ** 2).mean()))
-
             max_vel.append(np.max(velocity))
             rms_vel.append(np.sqrt((velocity ** 2).mean()))
+
+            # Attitude Estimation Error
+            att_est_dev = []
+            for att_true, att_est in zip(self.states[:, :3], self.state_estimates[:, :3]):
+                R1 = self.drone.rotationBodytoEarth(att_true).T         # inertial to true
+                R2 = self.drone.rotationBodytoEarth(att_est)            # estimate to inertial
+                Rerr = R1 @ R2
+                att_est_dev.append(np.linalg.norm(Rotation.from_matrix(Rerr).as_rotvec()) * 180 / np.pi)
+            max_estimate_att.append(np.max(att_est_dev))
+            rmse_estimate_att.append(np.sqrt((np.array(att_est_dev) ** 2).mean()))
+
             self.reset()
             print("Simulation Count: ", i+1)
 
         print("============================================")
-        print("max(||x - x_ref||) :", np.array(max_dev).mean())
-        print("RMSE(||x - x_ref||) :", np.array(rmse_pos).mean())
+        print("max(||p - p_ref||) :", np.array(max_control_dev).mean())
+        print("RMSE(||p - p_ref||) :", np.array(rmse_control_pos).mean())
+        print(r"max(||$\eta_{true}$ - $\eta_{est}$||) :", np.array(max_estimate_att).mean())
+        print(r"RMSE(||$\eta_{true}$ - $\eta_{est}$||) :", np.array(rmse_estimate_att).mean())
         print("max(||v||) :", np.array(max_vel).mean())
         print("RMS(||v||) :", np.array(rms_vel).mean())
         print("============================================")
@@ -142,8 +158,8 @@ class Simulate:
         fig1, ax = plt.subplots(3, 2)
 
         ax[0, 0].plot(self.time, self.states[:, 0] * 180 / np.pi, label="state")
-        ax[0, 0].plot(self.time, self.attitude_ref[:, 0] * 180 / np.pi, label="ref")
-        ax[0, 0].plot(self.time, self.state_estimates[:, 0] * 180 / np.pi)
+        ax[0, 0].plot(self.time, self.attitude_ref[:, 0] * 180 / np.pi, label="reference")
+        ax[0, 0].plot(self.time, self.state_estimates[:, 0] * 180 / np.pi, label="estimate")
         ax[0, 0].set_ylabel("Roll Angle [deg]")
         ax[0, 0].grid()
 
@@ -177,9 +193,10 @@ class Simulate:
 
 
         fig2, ax = plt.subplots(3, 3)
-        ax[0, 0].plot(self.time, self.states[:, 6], self.time, self.position_ref[:, 0])
-        ax[0, 0].plot(self.time, self.state_estimates[:, 6])
-        ax[0, 0].scatter(self.trajectory.time, self.trajectory.waypoints[:, 0])
+        ax[0, 0].plot(self.time, self.states[:, 6], label='True States')
+        ax[0, 0].plot(self.time, self.position_ref[:, 0], label='Reference')
+        ax[0, 0].plot(self.time, self.state_estimates[:, 6], label='Estimated States')
+        ax[0, 0].scatter(self.trajectory.time, self.trajectory.waypoints[:, 0], label='Waypoints')
         ax[0, 0].set_ylabel("X-position [m]")
         ax[0, 0].grid()
 
@@ -282,10 +299,10 @@ if __name__ == '__main__':
         description='This program simulates the trajectory controller, either summarizing some metrics or plotting results',
         epilog='Text at the bottom of help')
     parser.add_argument("--action", default="plot", choices=["plot", "metrics"])
-    parser.add_argument('--trajectory', default="figure-8", choices=["figure-8", "random", "hover"])
+    parser.add_argument('--trajectory', default="random", choices=["figure-8", "random", "hover"])
     parser.add_argument('--wind_condition', default="no-wind", choices=["no-wind", "wind"])
     parser.add_argument("--num_eval", default=100, type=int)
-    parser.add_argument("--seed", default=None, type=int)
+    parser.add_argument("--seed", default=10, type=int)
     args = parser.parse_args()
 
     if type(args.seed) is int:
