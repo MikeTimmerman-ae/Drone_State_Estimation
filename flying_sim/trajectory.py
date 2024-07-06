@@ -184,7 +184,7 @@ class Trajectory:
         plt.show()
 
 
-def test_trajectory():
+def run_trajectory():
     config = configs.config.Config()
     trajectory = Trajectory(config)
     trajectory.random_spline_trajectory()
@@ -253,4 +253,3 @@ def test_trajectory():
     ax.set_zlabel(r"$p_z$-position [m]")
 
     plt.show()
-

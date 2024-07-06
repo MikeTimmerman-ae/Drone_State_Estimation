@@ -6,7 +6,6 @@ from configs.config import Config
 from scipy.spatial.transform import Rotation
 
 import numpy as np
-import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import argparse
@@ -48,6 +47,7 @@ class Simulate:
         self.position_ref = np.array([0, 0, 0])
         self.measurements = np.zeros((15, ))
         self.state_estimates = np.zeros((12, ))
+        self.estimate_covariance = np.zeros((1, ))
         self.time = [0]
 
     def simulate(self):
@@ -100,12 +100,13 @@ class Simulate:
             self.position_ref = np.vstack((self.position_ref, pos_ref))
             self.measurements = np.vstack((self.measurements, sensor_measurements))
             self.state_estimates = np.vstack((self.state_estimates, self.estimation.state_estimate))
+            self.estimate_covariance = np.vstack((self.estimate_covariance, np.linalg.norm(np.sqrt(np.diag(self.estimation.mkf.cov)))))
             self.time.append(self.time[-1] + self.drone.dt)
 
             # Termination condition
-            # if np.linalg.norm(self.trajectory.waypoints[-1] - self.drone.position) < 0.5:
-            #     print(f"Drone reach last waypoint {self.time[-1]} sec.")
-                # break
+            if np.linalg.norm(self.trajectory.waypoints[-1] - self.drone.position) < 0.5:
+                print(f"Drone reach last waypoint {self.time[-1]} sec.")
+                break
 
         print("Runtime: %s seconds" % (time.time() - start_time)) # Print runtime
 
@@ -246,7 +247,7 @@ class Simulate:
 
         plt.tight_layout()
 
-
+        # Plot inputs
         fig3, ax = plt.subplots(4, 1)
 
         ax[0].plot(self.time, np.sqrt(np.abs(self.inputs[:, 0])) * 60 / (2 * np.pi))
@@ -265,23 +266,9 @@ class Simulate:
         ax[3].plot(self.time, np.sqrt(np.abs(self.inputs[:, 3])) * 60 / (2 * np.pi))
         ax[3].set_ylabel("rotational velocity 4 [rad/s]")
         ax[3].grid()
-
-        # fig4, ax = plt.subplots(3, 1)
-
-        # ax[0].plot(self.time[:-1], self.drone.thrust[::4])
-        # ax[0].set_ylabel("Drag force magnitude [N]")
-        # ax[0].grid()
-        #
-        # ax[1].plot(self.time[:-1], self.drone.gravity[::4])
-        # ax[1].set_ylabel("Gravity force magnitude [N]")
-        # ax[1].grid()
-        #
-        # ax[2].plot(self.time[:-1], self.drone.drag[::4])
-        # ax[2].set_ylabel("Drag force magnitude [N]")
-        # ax[2].grid()
-
         plt.tight_layout()
 
+        # Plot 3d position trajectory
         ax = plt.figure().add_subplot(projection='3d')
         ax.plot(self.states[:, 6], self.states[:, 7], self.states[:, 8])
         ax.plot(self.position_ref[:, 0], self.position_ref[:, 1], self.position_ref[:, 2])
@@ -289,6 +276,37 @@ class Simulate:
         ax.set_xlabel("X-position [m]")
         ax.set_ylabel("Y-position [m]")
         ax.set_zlabel("Z-position [m]")
+
+        # Plot attitude estimation performance
+        att_est_dev_angle = np.zeros((len(self.states), ))
+        att_est_dev_euler = np.zeros(self.states[:, :3].shape)
+        for i, (att_true, att_est) in enumerate(zip(self.states[:, :3], self.state_estimates[:, :3])):
+            R1 = self.drone.rotationBodytoEarth(att_true).T  # inertial to true
+            R2 = self.drone.rotationBodytoEarth(att_est)  # estimate to inertial
+            Rerr = R1 @ R2
+            att_est_dev_angle[i] = np.linalg.norm(Rotation.from_matrix(Rerr).as_rotvec())
+            att_est_dev_euler[i, :] = Rotation.from_matrix(Rerr).as_euler('xyz')
+
+        fig5, ax = plt.subplots(3, 1)
+        ax[0].plot(self.time, att_est_dev_euler[:, 0] * 180 / np.pi)
+        ax[0].set_ylabel("Roll Angle Error [deg]")
+        ax[0].grid()
+
+        ax[1].plot(self.time, att_est_dev_euler[:, 1] * 180 / np.pi)
+        ax[1].set_ylabel("Pitch Angle Error [deg]")
+        ax[1].grid()
+
+        ax[2].plot(self.time, att_est_dev_euler[:, 2] * 180 / np.pi)
+        ax[2].set_ylabel("Yaw Angle Error [deg]")
+        ax[2].set_xlabel("Time [s]")
+        ax[2].grid()
+
+        fig6 = plt.figure()
+        plt.plot(self.time[1:], att_est_dev_angle[1:] * 180 / np.pi, label='Estimation Error')
+        plt.plot(self.time[1:], self.estimate_covariance[1:] * 180 / np.pi, label='Uncertainty')
+        plt.plot(self.time[1:], -self.estimate_covariance[1:] * 180 / np.pi)
+        plt.ylabel("Axis-Angle Error [deg]")
+        plt.grid()
 
         plt.show()
 

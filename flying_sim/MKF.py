@@ -14,6 +14,7 @@ class MultiplicativeKF:
         self.Racc = np.diag([1e-2, 1e-2, 1e-2])
         self.Rmag = np.diag([1e-2, 1e-2, 1e-2])
         self.mag_model = np.array([1, 0, 0])
+        self.g_model = np.array([0, 0, 1])
 
     def estimate_attitude(self, att_meas):
         acc = att_meas[:3]
@@ -31,7 +32,7 @@ class MultiplicativeKF:
         # Determine attitude error vectors
         Rbe = self.rotationEarthtoBody(self.q_est)
 
-        n_err = np.cross(acc / np.linalg.norm(acc), Rbe @ np.array([0, 0, 1]))
+        n_err = np.cross(acc / np.linalg.norm(acc), Rbe @ self.g_model)
         ang_err = np.arccos(np.dot(acc / np.linalg.norm(acc), Rbe @ np.array([0, 0, 1])))
         self.att_err = ang_err * n_err
 
@@ -50,7 +51,6 @@ class MultiplicativeKF:
         self.cov = self.cov - K @ self.cov
         self.att_err = K @ self.att_err
         self.q_est = self.quaternion_multiply(self.axisangle2quat(self.att_err), self.q_est)
-
         att_est = self.quat2euler(self.q_est)
         return np.hstack((att_est, ang_vel))
 
