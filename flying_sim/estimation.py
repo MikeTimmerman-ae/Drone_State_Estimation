@@ -1,6 +1,6 @@
 import numpy as np
 from flying_sim.pf import ParticleFilter
-from flying_sim.MKF import MultiplicativeKF
+from flying_sim.mkf import MultiplicativeKF
 
 
 class Sensors:
